@@ -1,0 +1,156 @@
+---
+title: "Crude Death Rates"
+author: Stephen Sani
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+Load required packages
+
+```{r message=FALSE, warning=FALSE}
+library(readr)
+library(vroom)
+library(tidyverse)
+library(tidyr)
+library(ggplot2)
+```
+
+# Getting data
+Read mortality and population data
+```{r message=FALSE, warning=FALSE}
+# Read mortality data
+mortdata <- vroom::vroom("data/mortdata.csv")
+# Read population data
+popdata <- vroom::vroom("data/popdata.csv")
+```
+
+Preview mortality data
+```{r}
+head(mortdata, 5)
+```
+
+Preview population data
+```{r}
+head(popdata, 5)
+```
+
+Preview provides some information along with the first five rows. 
+View technical information to get more relevant information on the data.
+
+Technical information on mortality data
+```{r}
+glimpse(mortdata)
+
+```
+From the information on mortality data, d8 have "NA" values. In addition, the data type for d8 is now logical and not double like the other d# columns.
+
+Similar information is provided from the structure of the data
+```{r}
+str(mortdata)
+
+```
+
+Technical information on population data
+
+```{r}
+glimpse(popdata)
+
+```
+
+View the structure of population data
+```{r}
+str(popdata)
+```
+
+# Data cleaning
+For the NA values in mortality data, lets find out columns with NA values
+```{r}
+colSums(is.na(mortdata))[colSums(is.na(mortdata))>0]
+
+```
+
+There are actually NA values in three columns: d8, d17 and d18. Although d17 and d18 only contain NA values, all of the values in d8 are NA (Where NA represent missing values)
+
+It is possible to obtain all the deleted values for d8
+The best approach would be to subtract the sum of d1 to d19 from total dropping NA values
+
+```{r}
+all_d = mortdata %>%
+    select(starts_with("d"))
+
+mortdata_filled <- mortdata %>%
+    mutate(d8 = total - rowSums(all_d, na.rm = TRUE))
+
+```
+
+Lets confirm that there are no longer missing values in d8 of mortality data
+```{r}
+colSums(is.na(mortdata_filled))[colSums(is.na(mortdata_filled))>0]
+```
+Although there are equal numbers of missing values in d17 and d18, if some rows have missing value in only one of the columns, we could retrieve the correct value otherwise, we must employ a fill strategy or drop the rows
+
+We may drop rows that have missing value in d17 and d18
+```{r}
+mortdata_filtered = mortdata_filled[rowSums(is.na(mortdata_filled[, c('d17', 'd18')])) != 2, ]
+```
+
+Alternatively, we proceed with filling missing values in d17 and d18 using median
+```{r}
+mortdata_medfill <- mortdata_filled %>% 
+    mutate(
+        d17 = ifelse(is.na(d17), median(d17, na.rm = TRUE), d17),
+        d18 = ifelse(is.na(d18), median(d18, na.rm = TRUE), d18)
+    )
+```
+
+
+Are there rows that still have missing values
+```{r}
+colSums(is.na(mortdata_medfill))[colSums(is.na(mortdata_medfill))>0]
+```
+No any other missing value in mortdata to handle.
+
+Are there missing values in population data?
+```{r}
+colSums(is.na(popdata))[colSums(is.na(popdata))>0]
+```
+There are no missing values in population data.
+
+# Some analysis
+For the cause AAA that denotes deaths from all causes, we produce a summary table containing total deaths by country, sex and age group (total, 0-19, 20-69, 70+).  
+```{r}
+all_causes <- mortdata_medfill %>%
+    filter(cause == "AAA") %>%
+    left_join(popdata) %>%
+    select(name, sex, starts_with("d"), total)
+all_causes
+```
+
+For the cause I64 (Stroke not specified whether ischaemic or haemorrhagic), we calculate the crude death rate (all ages) by sex for each country
+```{r}
+stroke <- mortdata_medfill %>%
+    filter(cause == "I64") %>%
+    select(country, sex, total) %>%
+    left_join(popdata) %>%
+    select(-country) %>%
+    rename(country = name) %>%
+    mutate(death_rate = total/pop) %>%
+    relocate(country, .before = sex, )
+stroke
+```
+
+The following graph illustrates the result
+```{r}
+stroke %>%
+    ggplot()+
+    geom_col(
+        mapping = aes(y = country, x = death_rate, fill = factor(sex)), 
+        position = "dodge"
+    )
+```
+
+# Conclussion
+Except in Kyrgyzstan where crude death rate for cause I64 (Stroke not specified whether ischaemic or haemorrhagic) is higher in sex 1 compared to sex 2, the crude death rate for cause I64 (Stroke not specified whether ischaemic or haemorrhagic) is generally higher in sex 2 compared to sex 1 for all other countries.
